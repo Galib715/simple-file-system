@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simple File System</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: monospace; background:#1e1e2e; color:#cdd6f4; display:flex; height:100vh; overflow:hidden; }
+#sidebar { width:270px; background:#181825; padding:16px; border-right:1px solid #313244; display:flex; flex-direction:column; gap:10px; overflow-y:auto; }
+#main { flex:1; display:flex; flex-direction:column; padding:16px; gap:12px; overflow-y:auto; }
+h2 { color:#cba6f7; font-size:12px; text-transform:uppercase; letter-spacing:1px; margin-bottom:2px; }
+.card { background:#181825; border:1px solid #313244; border-radius:8px; padding:12px; }
+input, textarea { width:100%; background:#1e1e2e; border:1px solid #313244; color:#cdd6f4; padding:7px; border-radius:4px; font-family:monospace; font-size:12px; margin-top:4px; }
+button { width:100%; padding:7px; margin-top:5px; border:none; border-radius:4px; background:#cba6f7; color:#1e1e2e; font-weight:bold; cursor:pointer; font-family:monospace; font-size:12px; }
+button:hover { opacity:0.85; }
+.btn-red { background:#f38ba8; }
+.btn-green { background:#a6e3a1; }
+.btn-blue { background:#89b4fa; }
+#log { background:#11111b; border:1px solid #313244; border-radius:8px; padding:12px; height:220px; overflow-y:auto; font-size:13px; line-height:1.6; }
+#log p { padding:3px 0; border-bottom:1px solid #1e1e2e; }
+.ok { color:#a6e3a1; } .err { color:#f38ba8; } .info { color:#89b4fa; }
+#bitmap-grid { display:grid; grid-template-columns:repeat(16,1fr); gap:2px; }
+.block { height:18px; border-radius:2px; }
+.block.used { background:#f38ba8; } .block.free { background:#a6e3a1; } .block.sys { background:#fab387; }
+#stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.stat { background:#1e1e2e; border-radius:6px; padding:10px; text-align:center; }
+.stat .val { font-size:20px; color:#cba6f7; font-weight:bold; }
+.stat .lbl { font-size:11px; color:#6c7086; }
+#tree-container { background:#181825; border:1px solid #313244; border-radius:8px; padding:12px; height:280px; overflow-y:auto; }
+#breadcrumb { font-size:12px; color:#6c7086; margin-bottom:6px; }
+#breadcrumb span { color:#cba6f7; cursor:pointer; }
+#breadcrumb span:hover { text-decoration:underline; }
+.tree-item { display:flex; align-items:center; gap:8px; padding:7px 8px; border-radius:6px; cursor:pointer; font-size:13px; margin-bottom:3px; border:1px solid transparent; }
+.tree-item:hover { background:#1e1e2e; border-color:#313244; }
+.tree-item .icon { font-size:16px; } .tree-item .name { flex:1; } .tree-item .meta { font-size:11px; color:#6c7086; }
+.tree-item.dir .name { color:#cba6f7; } .tree-item.file .name { color:#cdd6f4; }
+.back-btn { color:#fab387; font-size:12px; cursor:pointer; margin-bottom:8px; display:inline-block; padding:4px 8px; background:#2a2a3d; border-radius:4px; }
+#current-path { font-size:13px; color:#a6e3a1; margin-bottom:8px; font-weight:bold; padding:6px 8px; background:#1e1e2e; border-radius:4px; }
+#location-box { background:#1e1e2e; border:2px solid #a6e3a1; border-radius:6px; padding:8px; font-size:12px; }
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>⚙ SFS Control</h2>
+  <div id="location-box">
+    📍 You are in:<br>
+    <span id="sidebar-location" style="color:#a6e3a1;font-weight:bold">/ (root)</span><br>
+    <span id="sidebar-inode" style="color:#6c7086;font-size:11px">inode: 0</span>
+  </div>
+  <div class="card">
+    <h2>Format Disk</h2>
+    <button class="btn-red" onclick="formatDisk()">⚠ Format</button>
+  </div>
+  <div class="card">
+    <h2>Make Directory</h2>
+    <input id="mkdir-name" placeholder="folder name" />
+    <button onclick="mkdir()">+ mkdir</button>
+  </div>
+  <div class="card">
+    <h2>Create File</h2>
+    <input id="create-name" placeholder="filename.txt" />
+    <button onclick="createFile()">+ create</button>
+  </div>
+  <div class="card">
+    <h2>Write to File</h2>
+    <input id="write-name" placeholder="filename.txt" />
+    <textarea id="write-content" rows="3" placeholder="content..."></textarea>
+    <button onclick="writeFile()">✎ write</button>
+  </div>
+  <div class="card">
+    <h2>Read File</h2>
+    <input id="read-name" placeholder="filename.txt" />
+    <button class="btn-green" onclick="readFile()">⊕ read</button>
+  </div>
+  <div class="card">
+    <h2>Delete</h2>
+    <input id="delete-name" placeholder="name" />
+    <button class="btn-red" onclick="deleteFile()">✕ delete</button>
+  </div>
+  <button class="btn-blue" onclick="refreshState()">↺ Refresh</button>
+</div>
+
+<div id="main">
+  <h2>📊 Disk Stats</h2>
+  <div id="stats" class="card">
+    <div class="stat"><div class="val" id="s-total">-</div><div class="lbl">Total Blocks</div></div>
+    <div class="stat"><div class="val" id="s-free">-</div><div class="lbl">Free Blocks</div></div>
+    <div class="stat"><div class="val" id="s-inodes">-</div><div class="lbl">Free Inodes</div></div>
+    <div class="stat"><div class="val" id="s-size">-</div><div class="lbl">Block Size</div></div>
+  </div>
+  <h2>🗺 Disk Block Map</h2>
+  <div class="card">
+    <div style="font-size:11px;margin-bottom:6px;">
+      <span style="color:#fab387">■</span> System &nbsp;
+      <span style="color:#f38ba8">■</span> Used &nbsp;
+      <span style="color:#a6e3a1">■</span> Free
+    </div>
+    <div id="bitmap-grid"></div>
+  </div>
+  <h2>📁 File Explorer</h2>
+  <div id="tree-container">
+    <div id="current-path">📍 /</div>
+    <div id="breadcrumb"></div>
+    <div id="back-row"></div>
+    <div id="file-tree"></div>
+  </div>
+  <h2>📋 Log</h2>
+  <div id="log"></div>
+</div>
+
+<script>
+var currentInodeId = 0;
+var pathStack = [{ id: 0, name: "/" }];
+var allInodes = [];
+var BASE = window.location.origin;
+
+function updateLocation() {
+  var path = "/";
+  for (var i = 1; i < pathStack.length; i++) path += pathStack[i].name + "/";
+  document.getElementById("sidebar-location").textContent = path;
+  document.getElementById("sidebar-inode").textContent = "inode: " + currentInodeId;
+  document.getElementById("current-path").textContent = "📍 " + path;
+}
+
+function log(msg, type) {
+  if (!type) type = "ok";
+  var d = document.getElementById("log");
+  var p = document.createElement("p");
+  p.className = type;
+  p.textContent = "> " + msg;
+  d.insertBefore(p, d.firstChild);
+}
+
+function apiFetch(path, method, body, callback) {
+  var opts = { method: method || "GET", headers: { "Content-Type": "application/json" } };
+  if (body) opts.body = JSON.stringify(body);
+  fetch(BASE + path, opts)
+    .then(function(r) { return r.json(); })
+    .then(function(data) { if (callback) callback(data); })
+    .catch(function(e) { log("Error: " + e.message, "err"); });
+}
+
+function refreshState() {
+  apiFetch("/api/state", "GET", null, function(data) {
+    if (!data || data.error) { log("Failed to load state", "err"); return; }
+    allInodes = data.inodes || [];
+    document.getElementById("s-total").textContent  = data.total_blocks;
+    document.getElementById("s-free").textContent   = data.free_blocks;
+    document.getElementById("s-inodes").textContent = data.free_inodes;
+    document.getElementById("s-size").textContent   = data.block_size + "B";
+    var grid = document.getElementById("bitmap-grid");
+    grid.innerHTML = "";
+    data.bitmap.forEach(function(v, i) {
+      var b = document.createElement("div");
+      b.className = "block " + (i < 6 ? "sys" : v ? "used" : "free");
+      b.title = "Block " + i;
+      grid.appendChild(b);
+    });
+    renderTree();
+    updateLocation();
+  });
+}
+
+function renderTree() {
+  var bc = document.getElementById("breadcrumb");
+  bc.innerHTML = "";
+  pathStack.forEach(function(p, i) {
+    var s = document.createElement("span");
+    s.textContent = p.name;
+    s.onclick = function() { navigateTo(i); };
+    bc.appendChild(s);
+    if (i < pathStack.length - 1) bc.appendChild(document.createTextNode(" / "));
+  });
+
+  var backRow = document.getElementById("back-row");
+  backRow.innerHTML = "";
+  if (pathStack.length > 1) {
+    var btn = document.createElement("div");
+    btn.className = "back-btn";
+    btn.textContent = "⬅ back";
+    btn.onclick = goBack;
+    backRow.appendChild(btn);
+  }
+
+  var tree = document.getElementById("file-tree");
+  tree.innerHTML = "";
+  var children = allInodes.filter(function(n) { return n.parent === currentInodeId; });
+  if (children.length === 0) {
+    tree.innerHTML = "<p style='color:#6c7086;font-size:12px;padding:8px'>(empty folder)</p>";
+    return;
+  }
+  var dirs  = children.filter(function(n) { return n.is_dir; });
+  var files = children.filter(function(n) { return !n.is_dir; });
+  dirs.concat(files).forEach(function(node) {
+    var div = document.createElement("div");
+    div.className = "tree-item " + (node.is_dir ? "dir" : "file");
+    div.innerHTML =
+      "<span class='icon'>" + (node.is_dir ? "📁" : "📄") + "</span>" +
+      "<span class='name'>" + node.name + "</span>" +
+      "<span class='meta'>" + (node.is_dir ? "click to open" : node.size + "B") + "</span>";
+    if (node.is_dir) {
+      (function(n) { div.onclick = function() { enterFolder(n.id, n.name); }; })(node);
+    } else {
+      (function(n) { div.onclick = function() { previewFile(n.name, n.parent); }; })(node);
+    }
+    tree.appendChild(div);
+  });
+}
+
+function enterFolder(id, name) {
+  currentInodeId = id;
+  pathStack.push({ id: id, name: name });
+  log("📂 Opened: " + name + " (inode " + id + ")", "info");
+  updateLocation();
+  renderTree();
+}
+
+function goBack() {
+  if (pathStack.length <= 1) return;
+  pathStack.pop();
+  currentInodeId = pathStack[pathStack.length - 1].id;
+  updateLocation();
+  renderTree();
+}
+
+function navigateTo(index) {
+  pathStack = pathStack.slice(0, index + 1);
+  currentInodeId = pathStack[pathStack.length - 1].id;
+  updateLocation();
+  renderTree();
+}
+
+function previewFile(name, parent) {
+  apiFetch("/api/read?name=" + name + "&parent=" + parent, "GET", null, function(r) {
+    if (r && r.content) log("📄 " + name + ": " + r.content, "info");
+    else log("Could not read " + name, "err");
+  });
+}
+
+function formatDisk() {
+  if (!confirm("Format disk? All data will be lost!")) return;
+  apiFetch("/api/format", "POST", {}, function(r) {
+    pathStack = [{ id: 0, name: "/" }];
+    currentInodeId = 0;
+    log(r && r.message ? r.message : "Formatted");
+    refreshState();
+  });
+}
+
+function mkdir() {
+  var name = document.getElementById("mkdir-name").value.trim();
+  if (!name) { log("Enter a folder name!", "err"); return; }
+  log("Creating folder: " + name + " in inode " + currentInodeId, "info");
+  apiFetch("/api/mkdir", "POST", { name: name, parent: currentInodeId }, function(r) {
+    log(r && r.message ? r.message : "Done");
+    document.getElementById("mkdir-name").value = "";
+    refreshState();
+  });
+}
+
+function createFile() {
+  var name = document.getElementById("create-name").value.trim();
+  if (!name) { log("Enter a file name!", "err"); return; }
+  log("Creating file: " + name + " in inode " + currentInodeId, "info");
+  apiFetch("/api/create", "POST", { name: name, parent: currentInodeId }, function(r) {
+    log(r && r.message ? r.message : "Done");
+    document.getElementById("create-name").value = "";
+    refreshState();
+  });
+}
+
+function writeFile() {
+  var name    = document.getElementById("write-name").value.trim();
+  var content = document.getElementById("write-content").value.trim();
+  if (!name || !content) { log("Enter file name and content!", "err"); return; }
+  apiFetch("/api/write", "POST", { name: name, content: content, parent: currentInodeId }, function(r) {
+    log(r && r.message ? r.message : "Done");
+    refreshState();
+  });
+}
+
+function readFile() {
+  var name = document.getElementById("read-name").value.trim();
+  if (!name) { log("Enter a file name!", "err"); return; }
+  apiFetch("/api/read?name=" + name + "&parent=" + currentInodeId, "GET", null, function(r) {
+    if (r && r.content) log("📄 " + name + ": " + r.content, "info");
+    else log("File not found", "err");
+  });
+}
+
+function deleteFile() {
+  var name = document.getElementById("delete-name").value.trim();
+  if (!name) { log("Enter a name!", "err"); return; }
+  apiFetch("/api/delete", "POST", { name: name, parent: currentInodeId }, function(r) {
+    log(r && r.message ? r.message : "Done");
+    document.getElementById("delete-name").value = "";
+    refreshState();
+  });
+}
+
+refreshState();
+</script>
+</body>
+</html>
